@@ -56,6 +56,10 @@ static struct early_suspend axp_early_suspend;
 int early_suspend_flag = 0;
 #endif
 
+int pmu_backup_rtc_enabled = 0;
+int pmu_backup_chgvol = 0;
+int pmu_backup_chgcur = 0;
+
 int ADC_Freq_Get(struct axp_charger *charger)
 {
 	uint8_t  temp;
@@ -1782,6 +1786,70 @@ static int axp_battery_probe(struct platform_device *pdev)
     }
   }
 #endif
+
+/* Addition to enable charging of RTC battery on AW-SoM Tech. System-on-Modules
+   configure sys_config.fex (script.bin) to enable.
+	pmu_backup_rtc_enabled   = 1
+	pmu_backup_chgvol	     = 3000
+	pmu_backup_chgcur	     = 50
+*/
+	var = script_parser_fetch("pmu_para", "pmu_backup_rtc_enabled", &pmu_backup_rtc_enabled, sizeof(int));
+	if (var) {
+		printk("axp driver failed to read pmu_backup_rtc_enabled from config file. RTC battery disabled.\n");
+		pmu_backup_rtc_enabled = 0;
+	} else {
+		pmu_backup_rtc_enabled = 1;
+		var = script_parser_fetch("pmu_para", "pmu_backup_chgvol", &pmu_backup_chgvol, sizeof(int));
+		if (var) {
+			pmu_backup_chgvol = 3000;
+			printk("axp driver failed to read pmu_backup_chgvol from config file. Using default value %d.\n",pmu_backup_chgvol);
+		} else {
+			printk("axp driver using pmu_backup_chgvol=%d from config file.\n",pmu_backup_chgvol);
+		}
+		var = script_parser_fetch("pmu_para", "pmu_backup_chgcur", &pmu_backup_chgcur, sizeof(int));
+		if (var) {
+			pmu_backup_chgcur = 50;
+			printk("axp driver failed to read pmu_backup_chgcur from config file. Using default value %d.\n",pmu_backup_chgcur);
+		} else {
+			printk("axp driver using pmu_backup_chgcur=%d from config file.\n",pmu_backup_chgcur);
+		}
+
+		//pmu_backup_rtc_enabled bit 7
+		switch(pmu_backup_chgvol){ //bits 5-6 00=3.1v, 01=3.0v, 10=3.6v, 11=2.5v
+			case 2500:
+				pmu_backup_chgvol=3;
+				break;
+			case 3100:
+				pmu_backup_chgvol=0;
+				break;
+			case 3600:
+				pmu_backup_chgvol=2;
+				break;
+			default:
+				pmu_backup_chgvol=1;
+				
+		}
+		switch(pmu_backup_chgcur){ //bits {0,1}  50{00},100{01},200{10},400{11}
+			case 100:
+				pmu_backup_chgcur=1;
+				break;
+			case 200:
+				pmu_backup_chgcur=2;
+				break;
+			case 400:
+				pmu_backup_chgcur=3;
+				break;
+			default:
+				pmu_backup_chgcur=0;
+				
+		}
+		char cfg_val=(pmu_backup_rtc_enabled<<7)+(pmu_backup_chgvol<<5)+pmu_backup_chgcur;
+
+		uint8_t vag=0;
+		axp_write(charger->master,0x35, cfg_val /*0xA0*/);
+		axp_read(charger->master,0x35,&vag);
+		printk("%d APX enable pmu_backup_rtc 0x%02x\n", __LINE__,vag);	
+	}
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
 	axp_charger = charger;
