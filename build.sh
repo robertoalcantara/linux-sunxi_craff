@@ -9,7 +9,7 @@ show_help()
 	printf "\nbuild.sh - Top level build scritps\n"
 	echo "Valid Options:"
 	echo "  -h  Show help message"
-	echo "  -p <platform> platform, e.g. sun4i, sun4i-lite, sun4i_crane"
+	echo "  -p <platform> platform, e.g. awsom10, awsom20, sun4i, sun4i-lite, sun4i_crane"
 	printf "  -m <module> module\n\n"
 }
 
@@ -37,7 +37,7 @@ if [ -z "$MODULE" ]; then
 fi
 
 if [ -x ./scripts/build_${PLATFORM}.sh ]; then
-	./scripts/build_${PLATFORM}.sh $MODULE
+	./scripts/build_${PLATFORM}.sh $PLATFORM $MODULE
 else
 	printf "\nERROR: Invalid Platform\n"
 	show_help
