@@ -36,13 +36,7 @@ if [ -z "$MODULE" ]; then
 	MODULE="all"
 fi
 
-if [ -x ./scripts/build_${PLATFORM}.sh ]; then
-	./scripts/build_${PLATFORM}.sh $PLATFORM $MODULE
-else
-	printf "\nERROR: Invalid Platform\n"
-	show_help
-	exit 1
-fi
+./scripts/build_aw-som.sh $PLATFORM $MODULE
 
 
 

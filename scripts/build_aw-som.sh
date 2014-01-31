@@ -2,7 +2,8 @@
 set -e
 #########################################################################
 #
-#          Simple build scripts to build krenel(with rootfs)  -- by Benn
+#          Simple build scripts to build krenel(with rootfs)
+#		AW-SoM Technologies 2014 aw-som.com
 #
 #########################################################################
 
@@ -19,17 +20,18 @@ export STRIP=${CROSS_COMPILE}strip
 export OBJCOPY=${CROSS_COMPILE}objcopy
 export OBJDUMP=${CROSS_COMPILE}objdump
 
-MODULE_OUT="output"
-KERNEL_VERSION="awsom10"
+PLATFORM=$1
+MODULE_OUT="output/${PLATFORM}"
+USE_DEFCONF=false
 KDIR=`pwd`
 LICHEE_MOD_DIR=${KDIR}/output/lib/modules/${KERNEL_VERSION}
 
 show_help()
 {
 	printf "
-Build script for awsom10 platform
+Build script for aw-som platform
 
-Invalid Options:
+Valid Options:
 
 	help         - show this help
 	kernel       - build kernel
@@ -41,12 +43,24 @@ Invalid Options:
 
 build_kernel()
 {
-	if [ ! -e .config ]; then
-		echo -e "\n\t\tUsing awsom10_defconfig config... ...!\n"
-		cp arch/arm/configs/awsom10_defconfig .config
+	if [ -e .config ]; then
+		rm .config
 	fi
+        if [ ! -e .config.${PLATFORM} ]; then
+		if [ ! -e arch/arm/configs/${PLATFORM}_defconfig ]; then
+			echo -e "\n\t\tInvalid platform ${PLATFORM}!\n"
+			exit 1
+		fi
+		echo -e "\n\t\tUsing ${PLATFORM}_defconfig config... ...!\n"
+                cp arch/arm/configs/${PLATFORM}_defconfig .config.${PLATFORM}
+		ln -s .config.${PLATFORM} .config
+	else
+		echo -e "\n\t\tUsing previous ${PLATFROM} config file .config.${PLATFORM}"
+		ln -s .config.${PLATFORM} .config
+        fi
 	make ARCH=${ARCH} INSTALL_MOD_PATH=${MODULE_OUT} CROSS_COMPILE=${CROSS_COMPILE} -j8 uImage modules
 	make ARCH=${ARCH} INSTALL_MOD_PATH=${MODULE_OUT} CROSS_COMPILE=${CROSS_COMPILE} -j8 modules_install
+	cp arch/arm/boot/uImage ${MODULE_OUT}
 	#${OBJCOPY} -R .note.gnu.build-id -S -O binary vmlinux output/bImage
 	#cp -vf arch/arm/boot/[zu]Image output/
 	#cp .config output/
@@ -105,7 +119,6 @@ clean_modules()
 #
 #####################################################################
 
-PLATFORM=$1
 case "$2" in
 kernel)
 	build_kernel
