@@ -18,4 +18,4 @@ obj-y        := dvb-core/	\
 		ngene/		\
 		ddbridge/
 
-obj-$(CONFIG_DVB_FIREDTV)	+= firewire/
+#obj-$(CONFIG_DVB_FIREDTV)	+= firewire/
