@@ -32,6 +32,9 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 #define IR_DEFAULT_TIMEOUT		100
 
+#undef CONFIG_SMS_SIANO_RC   //FORCANDO
+
+
 struct smscore_device_t;
 
 struct ir_t {
@@ -46,10 +49,19 @@ struct ir_t {
 	u32 controller;
 };
 
+#ifdef CONFIG_SMS_SIANO_RC
 int sms_ir_init(struct smscore_device_t *coredev);
 void sms_ir_exit(struct smscore_device_t *coredev);
 void sms_ir_event(struct smscore_device_t *coredev,
 			const char *buf, int len);
+#else
+inline static int sms_ir_init(struct smscore_device_t *coredev) {
+	return 0;
+}
+inline static void sms_ir_exit(struct smscore_device_t *coredev) {};
+inline static void sms_ir_event(struct smscore_device_t *coredev,
+			const char *buf, int len) {};
+#endif
 
 #endif /* __SMS_IR_H__ */
 
