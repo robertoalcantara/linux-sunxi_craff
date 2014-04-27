@@ -241,6 +241,7 @@ static int smsdvb_onresponse(void *context, struct smscore_buffer_t *cb)
 
 	switch (phdr->msgType) {
 	case MSG_SMS_DVBT_BDA_DATA:
+
 		dvb_dmx_swfilter(&client->demux, (u8 *)(phdr + 1),
 				 cb->size - sizeof(struct SmsMsgHdr_ST));
 		sms_debug("->RF  - MSG_SMS_DVBT_BDA_DATA");
@@ -336,6 +337,7 @@ static int smsdvb_onresponse(void *context, struct smscore_buffer_t *cb)
 
 		break;
 	}
+	case MSG_SMS_GET_STATISTICS_EX_RES:
 	case MSG_SMS_GET_STATISTICS_RES: {
 		union {
 			struct SMSHOSTLIB_STATISTICS_ISDBT_ST  isdbt;
@@ -392,6 +394,8 @@ static int smsdvb_onresponse(void *context, struct smscore_buffer_t *cb)
 				client->fe_status = 0;
 			sms_board_dvb3_event(client, DVB3_EVENT_FE_UNLOCK);
 		}
+		complete(&client->tune_done);
+
 	}
 
 	return 0;
@@ -481,7 +485,7 @@ static int smsdvb_sendrequest_and_wait(struct smsdvb_client_t *client,
 static int smsdvb_send_statistics_request(struct smsdvb_client_t *client)
 {
 	int rc;
-	struct SmsMsgHdr_ST Msg = { MSG_SMS_GET_STATISTICS_REQ,
+	struct SmsMsgHdr_ST Msg = { MSG_SMS_GET_STATISTICS_EX_REQ,
 				    DVBT_BDA_CONTROL_MSG_ID,
 				    HIF_TASK,
 				    sizeof(struct SmsMsgHdr_ST), 0 };

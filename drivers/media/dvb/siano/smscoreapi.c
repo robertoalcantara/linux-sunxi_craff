@@ -767,9 +767,15 @@ static int smscore_sendrequest_and_wait(struct smscore_device_t *coredev,
 		return rc;
 	}
 
-	return wait_for_completion_timeout(completion,
-			msecs_to_jiffies(SMS_PROTOCOL_MAX_RAOUNDTRIP_MS)) ?
-			0 : -ETIME;
+	if ( msecs_to_jiffies(SMS_PROTOCOL_MAX_RAOUNDTRIP_MS) ) {
+		rc = 0;
+	} else {
+		rc = -ETIME;
+	}
+	sms_debug("RF ->smscore_sendrequest_and_wait  rc=%d", rc);
+
+	return wait_for_completion_timeout(completion, rc);
+			
 }
 
 /**
