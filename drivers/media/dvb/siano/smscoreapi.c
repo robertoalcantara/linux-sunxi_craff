@@ -434,7 +434,7 @@ static struct mutex g_smscore_deviceslock;
 static struct list_head g_smscore_registry;
 static struct mutex g_smscore_registrylock;
 
-static int default_mode = 4;
+static int default_mode = DEVICE_MODE_NONE;
 
 module_param(default_mode, int, 0644);
 MODULE_PARM_DESC(default_mode, "default firmware id (device mode)");
@@ -880,8 +880,15 @@ int smscore_configure_board(struct smscore_device_t *coredev)
  */
 int smscore_start_device(struct smscore_device_t *coredev)
 {
-	int rc = smscore_set_device_mode(
-			coredev, smscore_registry_getmode(coredev->devpath));
+	int rc;
+	int board_id = smscore_get_board_id(coredev);
+	int mode = smscore_registry_getmode(coredev->devpath);
+
+	/* Device is initialized as DEVICE_MODE_NONE */
+	if (board_id != SMS_BOARD_UNKNOWN && mode == DEVICE_MODE_NONE)
+		mode = sms_get_board(board_id)->default_mode;
+
+	rc = smscore_set_device_mode(coredev, mode);
 	if (rc < 0) {
 		sms_info("set device mode faile , rc %d", rc);
 		return rc;
@@ -1039,9 +1046,92 @@ exit_fw_download:
 	return rc;
 }
 
+static char *smscore_fw_lkup[][DEVICE_MODE_MAX] = {
+	[SMS_NOVA_A0] = {
+		[DEVICE_MODE_DVBT]		= "dvb_nova_12mhz.inp",
+		[DEVICE_MODE_DVBH]		= "dvb_nova_12mhz.inp",
+		[DEVICE_MODE_DAB_TDMB]		= "tdmb_nova_12mhz.inp",
+		[DEVICE_MODE_DVBT_BDA]		= "dvb_nova_12mhz.inp",
+		[DEVICE_MODE_ISDBT]		= "isdbt_nova_12mhz.inp",
+		[DEVICE_MODE_ISDBT_BDA]		= "isdbt_nova_12mhz.inp",
+	},
+	[SMS_NOVA_B0] = {
+		[DEVICE_MODE_DVBT]		= "dvb_nova_12mhz_b0.inp",
+		[DEVICE_MODE_DVBH]		= "dvb_nova_12mhz_b0.inp",
+		[DEVICE_MODE_DAB_TDMB]		= "tdmb_nova_12mhz_b0.inp",
+		[DEVICE_MODE_DVBT_BDA]		= "dvb_nova_12mhz_b0.inp",
+		[DEVICE_MODE_ISDBT]		= "isdbt_nova_12mhz_b0.inp",
+		[DEVICE_MODE_ISDBT_BDA]		= "isdbt_nova_12mhz_b0.inp",
+		[DEVICE_MODE_FM_RADIO]		= "fm_radio.inp",
+		[DEVICE_MODE_FM_RADIO_BDA]	= "fm_radio.inp",
+	},
+	[SMS_VEGA] = {
+		[DEVICE_MODE_CMMB]		= "cmmb_vega_12mhz.inp",
+	},
+	[SMS_VENICE] = {
+		[DEVICE_MODE_CMMB]		= "cmmb_venice_12mhz.inp",
+	},
+	[SMS_MING] = {
+		[DEVICE_MODE_CMMB]		= "cmmb_ming_app.inp",
+	},
+	[SMS_PELE] = {
+		[DEVICE_MODE_ISDBT]		= "isdbt_pele.inp",
+		[DEVICE_MODE_ISDBT_BDA]		= "isdbt_pele.inp",
+	},
+	[SMS_RIO] = {
+		[DEVICE_MODE_DVBT]		= "dvb_rio.inp",
+		[DEVICE_MODE_DVBH]		= "dvbh_rio.inp",
+		[DEVICE_MODE_DVBT_BDA]		= "dvb_rio.inp",
+		[DEVICE_MODE_ISDBT]		= "isdbt_rio.inp",
+		[DEVICE_MODE_ISDBT_BDA]		= "isdbt_rio.inp",
+		[DEVICE_MODE_FM_RADIO]		= "fm_radio_rio.inp",
+		[DEVICE_MODE_FM_RADIO_BDA]	= "fm_radio_rio.inp",
+	},
+	[SMS_DENVER_1530] = {
+		[DEVICE_MODE_ATSC]		= "atsc_denver.inp",
+	},
+	[SMS_DENVER_2160] = {
+		[DEVICE_MODE_DAB_TDMB]		= "tdmb_denver.inp",
+	},
+};
 
+/**
+ * get firmware file name from one of the two mechanisms : sms_boards or
+ * smscore_fw_lkup.
+ * @param coredev pointer to a coredev object returned by
+ *		  smscore_register_device
+ * @param mode requested mode of operation
+ * @param lookup if 1, always get the fw filename from smscore_fw_lkup
+ *	 table. if 0, try first to get from sms_boards
+ *
+ * @return 0 on success, <0 on error.
+ */
 static char *smscore_get_fw_filename(struct smscore_device_t *coredev,
-			      int mode, int lookup);
+			      int mode)
+{
+	char **fw;
+	int board_id = smscore_get_board_id(coredev);
+	enum sms_device_type_st type;
+
+	type = smscore_registry_gettype(coredev->devpath);
+
+	/* Prevent looking outside the smscore_fw_lkup table */
+	if (type <= SMS_UNKNOWN_TYPE || type >= SMS_NUM_OF_DEVICE_TYPES)
+		return NULL;
+	if (mode <= DEVICE_MODE_NONE || mode >= DEVICE_MODE_MAX)
+		return NULL;
+
+	sms_debug("trying to get fw name from sms_boards board_id %d mode %d",
+		  board_id, mode);
+	fw = sms_get_board(board_id)->fw;
+	if (!fw || !fw[mode]) {
+		sms_debug("cannot find fw name in sms_boards, getting from lookup table mode %d type %d",
+			  mode, type);
+		return smscore_fw_lkup[type][mode];
+	}
+
+	return fw[mode];
+}
 
 /**
  * loads specified firmware into a buffer and calls device loadfirmware_handler
@@ -1054,7 +1144,7 @@ static char *smscore_get_fw_filename(struct smscore_device_t *coredev,
  * @return 0 on success, <0 on error.
  */
 static int smscore_load_firmware_from_file(struct smscore_device_t *coredev,
-					   int mode, int lookup,
+					   int mode,
 					   loadfirmware_t loadfirmware_handler)
 {
 	int rc = -ENOENT;
@@ -1062,10 +1152,12 @@ static int smscore_load_firmware_from_file(struct smscore_device_t *coredev,
 	u32 fw_buf_size;
 	const struct firmware *fw;
 
-	char *fw_filename = smscore_get_fw_filename(coredev, mode, lookup);
-	sms_debug("Firmware name: %s\n", fw_filename);
-	if (!strcmp(fw_filename, "none"))
+	char *fw_filename = smscore_get_fw_filename(coredev, mode);
+	if (!fw_filename) {
+		sms_info("mode %d not supported on this device", mode);
 		return -ENOENT;
+	}
+	sms_debug("Firmware name: %s", fw_filename);
 
 	if (loadfirmware_handler == NULL && !(coredev->device_flags
 			& SMS_DEVICE_FAMILY2))
@@ -1198,78 +1290,6 @@ static int smscore_detect_mode(struct smscore_device_t *coredev)
 	return rc;
 }
 
-static char *smscore_fw_lkup[][SMS_NUM_OF_DEVICE_TYPES] = {
-	/*Stellar, NOVA A0, Nova B0, VEGA, VENICE, MING, PELE, RIO, DENVER_1530, DENVER_2160 */
-		/*DVBT*/
-	{ "none", "dvb_nova_12mhz.inp", "dvb_nova_12mhz_b0.inp", "none", "none", "none", "none", "dvb_rio.inp", "none", "none" },
-		/*DVBH*/
-	{ "none", "dvb_nova_12mhz.inp", "dvb_nova_12mhz_b0.inp", "none", "none", "none", "none", "dvbh_rio.inp", "none", "none" },
-		/*TDMB*/
-	{ "none", "tdmb_nova_12mhz.inp", "tdmb_nova_12mhz_b0.inp", "none", "none", "none", "none", "none", "none", "tdmb_denver.inp" },
-		/*DABIP*/
-	{ "none", "none", "none", "none", "none", "none", "none", "none", "none", "none" },
-		/*DVBT_BDA*/
-	{ "none", "dvb_nova_12mhz.inp", "dvb_nova_12mhz_b0.inp", "none", "none", "none", "none", "dvb_rio.inp", "none", "none" },
-		/*ISDBT*/
-	{ "none", "isdbt_nova_12mhz.inp", "isdbt_nova_12mhz_b0.inp", "none", "none", "none", "isdbt_pele.inp", "isdbt_rio.inp", "none", "none" },
-		/*ISDBT_BDA*/
-	{ "none", "isdbt_nova_12mhz.inp", "isdbt_nova_12mhz_b0.inp", "none", "none", "none", "isdbt_pele.inp", "isdbt_rio.inp", "none", "none" },
-		/*CMMB*/
-	{ "none", "none", "none", "cmmb_vega_12mhz.inp", "cmmb_venice_12mhz.inp", "cmmb_ming_app.inp", "none", "none", "none", 	"none" },
-		/*RAW - not supported*/
-	{ "none", "none", "none", "none", "none", "none", "none", "none", "none", "none" },
-		/*FM*/
-	{ "none", "none", "fm_radio.inp", "none", "none", "none", "none", "fm_radio_rio.inp", "none", "none" },
-		/*FM_BDA*/
-	{ "none", "none", "fm_radio.inp", "none", "none", "none", "none", "fm_radio_rio.inp", "none", "none" },
-		/*ATSC*/
-	{ "none", "none", "none", "none", "none", "none", "none", "none", "atsc_denver.inp", "none" }
-};
-
-/**
- * get firmware file name from one of the two mechanisms : sms_boards or
- * smscore_fw_lkup.
- * @param coredev pointer to a coredev object returned by
- *		  smscore_register_device
- * @param mode requested mode of operation
- * @param lookup if 1, always get the fw filename from smscore_fw_lkup
- *	 table. if 0, try first to get from sms_boards
- *
- * @return 0 on success, <0 on error.
- */
-static char *smscore_get_fw_filename(struct smscore_device_t *coredev,
-			      int mode, int lookup)
-{
-	char **fw;
-	int board_id = smscore_get_board_id(coredev);
-	enum sms_device_type_st type;
-
-	type = smscore_registry_gettype(coredev->devpath);
-
-	if ((board_id == SMS_BOARD_UNKNOWN) || (lookup == 1)) {
-		sms_debug("trying to get fw name from lookup table mode %d type %d",
-			  mode, type);
-		return smscore_fw_lkup[mode][type];
-	}
-
-	sms_debug("trying to get fw name from sms_boards board_id %d mode %d",
-		  board_id, mode);
-	fw = sms_get_board(board_id)->fw;
-	if (fw == NULL) {
-		sms_debug("cannot find fw name in sms_boards, getting from lookup table mode %d type %d",
-			  mode, type);
-		return smscore_fw_lkup[mode][type];
-	}
-
-	if (fw[mode] == NULL) {
-		sms_debug("cannot find fw name in sms_boards, getting from lookup table mode %d type %d",
-			  mode, type);
-		return smscore_fw_lkup[mode][type];
-	}
-
-	return fw[mode];
-}
-
 /**
  * send init device request and wait for response
  *
@@ -1321,7 +1341,7 @@ int smscore_set_device_mode(struct smscore_device_t *coredev, int mode)
 
 	sms_debug("set device mode to %d", mode);
 	if (coredev->device_flags & SMS_DEVICE_FAMILY2) {
-		if (mode < DEVICE_MODE_DVBT || mode >= DEVICE_MODE_RAW_TUNER) {
+		if (mode <= DEVICE_MODE_NONE || mode >= DEVICE_MODE_MAX) {
 			sms_err("invalid mode specified %d", mode);
 			return -EINVAL;
 		}
@@ -1343,24 +1363,7 @@ int smscore_set_device_mode(struct smscore_device_t *coredev, int mode)
 
 		if (!(coredev->modes_supported & (1 << mode))) {
 			rc = smscore_load_firmware_from_file(coredev,
-							     mode, 0, NULL);
-
-			/*
-			* try again with the default firmware -
-			* get the fw filename from look-up table
-			*/
-			if (rc < 0) {
-				sms_debug("error %d loading firmware, trying again with default firmware",
-					  rc);
-				rc = smscore_load_firmware_from_file(coredev,
-								     mode, 1,
-								     NULL);
-				if (rc < 0) {
-					sms_debug("error %d loading firmware",
-						  rc);
-					return rc;
-				}
-			}
+							     mode, NULL);
 			if (rc >= 0)
 				sms_info("firmware download success");
 		} else {
@@ -1373,7 +1376,7 @@ int smscore_set_device_mode(struct smscore_device_t *coredev, int mode)
 				sms_err("device init failed, rc %d.", rc);
 		}
 	} else {
-		if (mode < DEVICE_MODE_DVBT || mode > DEVICE_MODE_MAX) {
+		if (mode <= DEVICE_MODE_NONE || mode >= DEVICE_MODE_MAX) {
 			sms_err("invalid mode specified %d", mode);
 			return -EINVAL;
 		}
