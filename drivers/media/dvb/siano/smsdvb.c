@@ -237,21 +237,28 @@ static int smsdvb_onresponse(void *context, struct smscore_buffer_t *cb)
 
 	smsendian_handle_rx_message((struct SmsMsgData_ST *) phdr);
 
+	sms_debug( "->RF smsdvb_onresponse: msgType: %d", phdr->msgType);
+
 	switch (phdr->msgType) {
 	case MSG_SMS_DVBT_BDA_DATA:
 		dvb_dmx_swfilter(&client->demux, (u8 *)(phdr + 1),
 				 cb->size - sizeof(struct SmsMsgHdr_ST));
+		sms_debug("->RF  - MSG_SMS_DVBT_BDA_DATA");
+
 		break;
 
 	case MSG_SMS_RF_TUNE_RES:
 	case MSG_SMS_ISDBT_TUNE_RES:
 		complete(&client->tune_done);
+		sms_debug("->RF  - MSG_SMS_ISDBT_TUNE_RES");
+
 		break;
 
 	case MSG_SMS_SIGNAL_DETECTED_IND:
 		sms_info("MSG_SMS_SIGNAL_DETECTED_IND");
 		client->sms_stat_dvb.TransmissionData.IsDemodLocked = true;
 		is_status_update = true;
+
 		break;
 
 	case MSG_SMS_NO_SIGNAL_IND:
@@ -281,7 +288,7 @@ static int smsdvb_onresponse(void *context, struct smscore_buffer_t *cb)
 				&client->sms_stat_dvb.ReceptionData;
 		struct SRVM_SIGNAL_STATUS_S SignalStatusData;
 
-		/*sms_info("MSG_SMS_HO_PER_SLICES_IND");*/
+		sms_debug("MSG_SMS_HO_PER_SLICES_IND");
 		pMsgData++;
 		SignalStatusData.result = pMsgData[0];
 		SignalStatusData.snr = pMsgData[1];
@@ -326,6 +333,7 @@ static int smsdvb_onresponse(void *context, struct smscore_buffer_t *cb)
 		pReceptionData->MRC_RSSI = pMsgData[22];
 
 		is_status_update = true;
+
 		break;
 	}
 	case MSG_SMS_GET_STATISTICS_RES: {
@@ -464,7 +472,7 @@ static int smsdvb_sendrequest_and_wait(struct smsdvb_client_t *client,
 	rc = smsclient_sendrequest(client->smsclient, buffer, size);
 	if (rc < 0)
 		return rc;
-
+	sms_debug("RF-> wait_for_completion_timeout"); //DEBUG
 	return wait_for_completion_timeout(completion,
 					   msecs_to_jiffies(2000)) ?
 						0 : -ETIME;
@@ -660,6 +668,11 @@ static int smsdvb_isdbt_set_frontend(struct dvb_frontend *fe)
 	struct smsdvb_client_t *client =
 		container_of(fe, struct smsdvb_client_t, frontend);
 
+	int board_id = smscore_get_board_id(client->coredev);
+    struct sms_board *board = sms_get_board(board_id);
+    enum sms_device_type_st type = board->type;
+
+	int ret;
 	struct {
 		struct SmsMsgHdr_ST	Msg;
 		u32		Data[4];
@@ -676,46 +689,51 @@ static int smsdvb_isdbt_set_frontend(struct dvb_frontend *fe)
 	if (c->isdbt_sb_segment_idx == -1)
 		c->isdbt_sb_segment_idx = 0;
 
-	switch (c->isdbt_sb_segment_count) {
-	case 3:
-		Msg.Data[1] = BW_ISDBT_3SEG;
-		break;
-	case 1:
-		Msg.Data[1] = BW_ISDBT_1SEG;
-		break;
-	case 0:	/* AUTO */
-		switch (c->bandwidth_hz / 1000000) {
-		case 8:
-		case 7:
-			c->isdbt_sb_segment_count = 3;
-			Msg.Data[1] = BW_ISDBT_3SEG;
-			break;
-		case 6:
-			c->isdbt_sb_segment_count = 1;
-			Msg.Data[1] = BW_ISDBT_1SEG;
-			break;
-		default: /* Assumes 6 MHZ bw */
-			c->isdbt_sb_segment_count = 1;
-			c->bandwidth_hz = 6000;
-			Msg.Data[1] = BW_ISDBT_1SEG;
-			break;
-		}
-		break;
-	default:
-		sms_info("Segment count %d not supported", c->isdbt_sb_segment_count);
-		return -EINVAL;
-	}
+    if (!c->isdbt_layer_enabled)
+        c->isdbt_layer_enabled = 7;
 
-	Msg.Data[0] = c->frequency;
-	Msg.Data[2] = 12000000;
-	Msg.Data[3] = c->isdbt_sb_segment_idx;
+        c->isdbt_layer_enabled = 7;
 
-	sms_info("%s: freq %d segwidth %d segindex %d\n", __func__,
-		 c->frequency, c->isdbt_sb_segment_count,
-		 c->isdbt_sb_segment_idx);
+        Msg.Data[0] = c->frequency;
+        Msg.Data[1] = BW_ISDBT_1SEG;
+        Msg.Data[2] = 12000000;
+        Msg.Data[3] = c->isdbt_sb_segment_idx;
 
-	return smsdvb_sendrequest_and_wait(client, &Msg, sizeof(Msg),
-					   &client->tune_done);
+        if (c->isdbt_partial_reception) {
+                if ((type == SMS_PELE || type == SMS_RIO) &&
+                    c->isdbt_sb_segment_count > 3)
+                        Msg.Data[1] = BW_ISDBT_13SEG;
+                else if (c->isdbt_sb_segment_count > 1)
+                        Msg.Data[1] = BW_ISDBT_3SEG;
+        } else if (type == SMS_PELE || type == SMS_RIO)
+                Msg.Data[1] = BW_ISDBT_13SEG;
+
+        c->bandwidth_hz = 6000000;
+
+        sms_info("%s: freq %d segwidth %d segindex %d", __func__,
+                 c->frequency, c->isdbt_sb_segment_count,
+                 c->isdbt_sb_segment_idx);
+
+        /* Disable LNA, if any. An error is returned if no LNA is present */
+        ret = sms_board_lna_control(client->coredev, 0);
+        if (ret == 0) {
+                fe_status_t status;
+
+                /* tune with LNA off at first */
+                ret = smsdvb_sendrequest_and_wait(client, &Msg, sizeof(Msg),
+                                                  &client->tune_done);
+
+                smsdvb_read_status(fe, &status);
+
+                if (status & FE_HAS_LOCK)
+                        return ret;
+
+                /* previous tune didn't lock - enable LNA and tune again */
+                sms_board_lna_control(client->coredev, 1);
+        }
+        return smsdvb_sendrequest_and_wait(client, &Msg, sizeof(Msg),
+                                           &client->tune_done);
+
 }
 
 static int smsdvb_set_frontend(struct dvb_frontend *fe)
