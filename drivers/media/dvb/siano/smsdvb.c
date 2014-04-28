@@ -394,8 +394,6 @@ static int smsdvb_onresponse(void *context, struct smscore_buffer_t *cb)
 				client->fe_status = 0;
 			sms_board_dvb3_event(client, DVB3_EVENT_FE_UNLOCK);
 		}
-		complete(&client->tune_done);
-
 	}
 
 	return 0;
