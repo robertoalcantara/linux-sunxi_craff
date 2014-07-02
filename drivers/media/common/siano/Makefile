@@ -10,7 +10,7 @@ obj-m += smsmdtv.o smsdvb.o
 #endif
 
 #ifeq ($(CONFIG_SMS_SIANO_DEBUGFS),y)
-#  smsdvb-objs += smsdvb-debugfs.o
+smsdvb-objs += smsdvb-debugfs.o
 #endif
 
 ccflags-y += -Idrivers/media/dvb/dvb-core

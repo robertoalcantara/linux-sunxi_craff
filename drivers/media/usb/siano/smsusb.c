@@ -125,9 +125,11 @@ static void smsusb_onresponse(struct urb *urb)
 			} else
 				surb->cb->offset = 0;
 
-			sms_debug("received %s(%d) size: %d",
-				  smscore_translate_msg(phdr->msg_type),
-				  phdr->msg_type, phdr->msg_length);
+			if (  phdr->msg_type != 693 ) {   //nao imprime MSG_SMS_DVBT_BDA_DATA
+				sms_debug("received %s(%d) size: %d",
+					  smscore_translate_msg(phdr->msg_type),
+				  	phdr->msg_type, phdr->msg_length);
+			}
 
 			smsendian_handle_rx_message((struct sms_msg_data *) phdr);
 

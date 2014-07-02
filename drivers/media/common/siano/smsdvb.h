@@ -14,7 +14,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  *
  ***********************************************************************/
-
+#define CONFIG_SMS_SIANO_DEBUGFS 1
 struct smsdvb_debugfs;
 struct smsdvb_client_t;
 
